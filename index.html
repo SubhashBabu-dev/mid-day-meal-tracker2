@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mid-Day Meal Tracker</title>
+<style>
+  :root { --brand:#0f4c5c; --brand2:#16697a; --accent:#f2a900; --bg:#eef3f4; --card:#fff; --ink:#12303a; --muted:#5b727a; --line:#dde6e8; --ok:#1b7f4b; --okbg:#e2f4ea; --bad:#b3261e; --badbg:#fbe8e6; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:"Segoe UI",Arial,sans-serif; background:var(--bg); color:var(--ink); }
+  header { background:linear-gradient(135deg,var(--brand),var(--brand2)); color:#fff; padding:22px 16px 56px; }
+  .wrap { max-width:900px; margin:0 auto; }
+  header h1 { margin:0; font-size:1.7rem; }
+  header p { margin:4px 0 0; opacity:.85; }
+  nav { display:flex; gap:6px; overflow-x:auto; margin-top:-34px; padding:0 16px; max-width:900px; margin-left:auto; margin-right:auto; }
+  nav button { background:#fff; color:var(--muted); border:0; padding:11px 16px; border-radius:10px 10px 0 0; font:inherit; font-weight:600; cursor:pointer; white-space:nowrap; }
+  nav button.on { color:var(--brand); box-shadow:inset 0 -3px 0 var(--accent); }
+  main { max-width:900px; margin:0 auto; padding:0 16px 40px; }
+  .card { background:var(--card); border-radius:0 12px 12px 12px; padding:20px; box-shadow:0 2px 10px rgba(0,0,0,.08); }
+  h2 { margin:0 0 14px; color:var(--brand); font-size:1.25rem; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:12px; margin-bottom:16px; }
+  .stat { background:var(--bg); border-radius:10px; padding:14px; border-left:4px solid var(--accent); }
+  .stat b { display:block; font-size:1.8rem; color:var(--brand); }
+  .stat span { color:var(--muted); font-size:.85rem; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px; }
+  .row > div { flex:1 1 140px; }
+  label { display:block; font-weight:600; font-size:.85rem; margin-bottom:4px; color:var(--muted); }
+  input, select { width:100%; padding:10px; border:1px solid #b8c7cc; border-radius:8px; font:inherit; background:#fff; color:var(--ink); }
+  button.btn { padding:10px 16px; border:0; border-radius:8px; background:var(--brand); color:#fff; font:inherit; font-weight:600; cursor:pointer; }
+  button.btn.alt { background:#fff; color:var(--brand); border:1px solid var(--brand); }
+  button.btn.del { background:#fff; color:var(--bad); border:1px solid var(--line); padding:6px 10px; }
+  .msg { padding:12px 14px; border-radius:8px; font-weight:600; margin:12px 0; }
+  .msg.ok { background:var(--okbg); color:var(--ok); }
+  .msg.bad { background:var(--badbg); color:var(--bad); }
+  .msg.info { background:var(--bg); color:var(--muted); }
+  .scroll { overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; min-width:420px; }
+  th, td { text-align:left; padding:9px 8px; border-bottom:1px solid var(--line); font-size:.92rem; }
+  th { color:var(--muted); font-weight:600; background:#f6f9fa; }
+  .pill { display:inline-block; padding:3px 10px; border-radius:999px; font-size:.8rem; font-weight:700; }
+  .pill.ok { background:var(--okbg); color:var(--ok); }
+  .pill.bad { background:var(--badbg); color:var(--bad); }
+  .pill.info { background:var(--bg); color:var(--muted); }
+  .tog { min-width:92px; padding:7px 12px; border-radius:999px; border:1px solid; font:inherit; font-weight:700; cursor:pointer; }
+  .tog.p { background:var(--okbg); color:var(--ok); border-color:var(--ok); }
+  .tog.a { background:var(--badbg); color:var(--bad); border-color:var(--bad); }
+  .toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:var(--ink); color:#fff; padding:10px 18px; border-radius:8px; opacity:0; transition:opacity .2s; pointer-events:none; }
+  .toast.on { opacity:1; }
+  .empty { color:var(--muted); padding:16px 0; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <h1>🍛 Mid-Day Meal Tracker</h1>
+    <p id="schoolLine"></p>
+  </div>
+</header>
+<nav id="tabs"></nav>
+<main><div class="card" id="view"></div></main>
+<div class="toast" id="toast"></div>
+
+<script>
+/* ============ 1. DATA (the "register book") ============
+   All data is kept in the browser's localStorage.
+   Shape: { school, students[], attendance{date:{id:'P'|'A'}}, meals{date:{menu,served,leftover}} } */
+const KEY = "mdm-pro-v1";
+function freshData() {
+  return { school: "Government Higher Primary School", students: [], attendance: {}, meals: {}, nextId: 1 };
+}
+let db;
+try { db = JSON.parse(localStorage.getItem(KEY)) || freshData(); } catch (e) { db = freshData(); }
+function save() { localStorage.setItem(KEY, JSON.stringify(db)); }
+
+/* ============ 2. HELPERS ============ */
+const $ = id => document.getElementById(id);
+const esc = t => String(t).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+function todayStr() {
+  const d = new Date();
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+  return d.toISOString().slice(0, 10);
+}
+function toast(msg) {
+  const t = $("toast"); t.textContent = msg; t.classList.add("on");
+  setTimeout(() => t.classList.remove("on"), 1800);
+}
+let tab = "dashboard", date = todayStr(), clsFilter = "all", search = "";
+
+/* Summary of one date: how many present, meals served, and the result */
+function summary(d) {
+  const att = db.attendance[d], meal = db.meals[d];
+  const present = att ? db.students.filter(s => att[s.id] === "P").length : 0;
+  const total = db.students.length;
+  const served = meal ? meal.served : 0;
+  let status = "Incomplete", kind = "info", text = "Attendance or meals not entered for this date.";
+  if (att && meal) {
+    const diff = served - present;
+    if (diff === 0) { status = "Match"; kind = "ok"; text = "Meals served match attendance."; }
+    else if (diff > 0) { status = "Mismatch"; kind = "bad"; text = diff + " more meals served than students present. Check the count."; }
+    else { status = "Mismatch"; kind = "bad"; text = (-diff) + " present students did not get a meal."; }
+  }
+  return { d, present, absent: att ? total - present : 0, total, served, status, kind, text,
+           menu: meal ? meal.menu : "", leftover: meal ? meal.leftover : 0,
+           pct: att && total ? Math.round(present * 100 / total) : 0, hasAtt: !!att, hasMeal: !!meal };
+}
+function allDates() {
+  return [...new Set([...Object.keys(db.attendance), ...Object.keys(db.meals)])].sort().reverse();
+}
+const classes = () => [...new Set(db.students.map(s => s.cls))].sort();
+const dateField = () => `<div><label for="dt">Date</label><input type="date" id="dt" value="${date}"></div>`;
+function bindDate() { $("dt").onchange = e => { date = e.target.value || todayStr(); render(); }; }
+
+/* ============ 3. TABS ============ */
+const tabList = [["dashboard", "📊 Dashboard"], ["students", "👩‍🎓 Students"], ["attendance", "📋 Attendance"], ["meals", "🍽️ Meals"], ["report", "🧾 Reports"]];
+function drawTabs() {
+  $("tabs").innerHTML = tabList.map(([k, l]) => `<button class="${k === tab ? "on" : ""}" data-k="${k}">${l}</button>`).join("");
+  $("tabs").onclick = e => { if (e.target.dataset.k) { tab = e.target.dataset.k; drawTabs(); render(); } };
+}
+function render() {
+  $("schoolLine").textContent = db.school + " · " + new Date(date + "T00:00").toDateString();
+  ({ dashboard, students, attendance, meals, report })[tab]();
+}
+
+/* ============ 4. DASHBOARD ============ */
+function dashboard() {
+  const s = summary(date);
+  const rows = allDates().slice(0, 7).map(summary);
+  $("view").innerHTML = `<h2>Dashboard</h2>
+    <div class="row">${dateField()}</div>
+    <div class="grid">
+      <div class="stat"><b>${s.total}</b><span>Total students</span></div>
+      <div class="stat"><b>${s.present}</b><span>Present</span></div>
+      <div class="stat"><b>${s.absent}</b><span>Absent</span></div>
+      <div class="stat"><b>${s.served}</b><span>Meals served</span></div>
+      <div class="stat"><b>${s.pct}%</b><span>Attendance</span></div>
+    </div>
+    <div class="msg ${s.kind}">${s.kind === "ok" ? "✅" : s.kind === "bad" ? "⚠️" : "ℹ️"} ${s.text}</div>
+    ${s.menu ? `<p>Today's menu: <b>${esc(s.menu)}</b></p>` : ""}
+    <h2>Last 7 days</h2>${historyTable(rows)}
+    <div class="row" style="margin-top:14px">
+      <div><label for="sch">School name</label><input id="sch" value="${esc(db.school)}"></div>
+    </div>`;
+  bindDate();
+  $("sch").onchange = e => { db.school = e.target.value.trim() || db.school; save(); render(); };
+}
+function historyTable(rows) {
+  if (!rows.length) return `<p class="empty">No records yet. Add students, mark attendance and log meals.</p>`;
+  return `<div class="scroll"><table><thead><tr><th>Date</th><th>Present</th><th>Served</th><th>Attendance</th><th>Status</th></tr></thead><tbody>` +
+    rows.map(r => `<tr><td>${r.d}</td><td>${r.present}/${r.total}</td><td>${r.served}</td><td>${r.pct}%</td><td><span class="pill ${r.kind}">${r.status}</span></td></tr>`).join("") +
+    `</tbody></table></div>`;
+}
+
+/* ============ 5. STUDENTS ============ */
+function students() {
+  const list = db.students.filter(s => (clsFilter === "all" || s.cls === clsFilter) &&
+    (s.name + s.roll).toLowerCase().includes(search.toLowerCase()));
+  $("view").innerHTML = `<h2>Students (${db.students.length})</h2>
+    <div class="row">
+      <div><label for="n">Student name *</label><input id="n"></div>
+      <div><label for="r">Roll number</label><input id="r"></div>
+      <div><label for="c">Class / section *</label><input id="c" placeholder="e.g. 5A"></div>
+      <div><label for="p">Parent phone</label><input id="p" type="tel"></div>
+    </div>
+    <button class="btn" id="add">Add student</button>
+    <div class="row" style="margin-top:18px">
+      <div><label for="q">Search</label><input id="q" value="${esc(search)}" placeholder="Name or roll"></div>
+      <div><label for="f">Class</label><select id="f"><option value="all">All classes</option>${classes().map(c => `<option ${c === clsFilter ? "selected" : ""}>${esc(c)}</option>`).join("")}</select></div>
+    </div>
+    ${list.length ? `<div class="scroll"><table><thead><tr><th>Name</th><th>Roll</th><th>Class</th><th>Phone</th><th></th></tr></thead><tbody>` +
+      list.map(s => `<tr><td>${esc(s.name)}</td><td>${esc(s.roll)}</td><td>${esc(s.cls)}</td><td>${esc(s.phone)}</td><td><button class="btn del" data-id="${s.id}">Remove</button></td></tr>`).join("") +
+      `</tbody></table></div>` : `<p class="empty">No students to show.</p>`}`;
+  $("add").onclick = () => {
+    const name = $("n").value.trim(), cls = $("c").value.trim();
+    if (!name || !cls) { toast("Name and class are required"); return; }
+    db.students.push({ id: db.nextId++, name, roll: $("r").value.trim() || "-", cls, phone: $("p").value.trim() || "-" });
+    save(); toast("Student added"); students();
+  };
+  $("q").oninput = e => { search = e.target.value; students(); $("q").focus(); $("q").setSelectionRange(search.length, search.length); };
+  $("f").onchange = e => { clsFilter = e.target.value; students(); };
+  document.querySelectorAll(".del").forEach(b => b.onclick = () => {
+    if (!confirm("Remove this student?")) return;
+    db.students = db.students.filter(s => s.id !== +b.dataset.id); save(); students();
+  });
+}
+
+/* ============ 6. ATTENDANCE ============ */
+function attendance() {
+  const list = db.students.filter(s => clsFilter === "all" || s.cls === clsFilter);
+  const att = Object.assign({}, db.attendance[date] || {});
+  list.forEach(s => { if (!att[s.id]) att[s.id] = "P"; });   // new students start as Present
+  const draw = () => {
+    const p = list.filter(s => att[s.id] === "P").length;
+    $("view").innerHTML = `<h2>Mark attendance</h2>
+      <div class="row">${dateField()}
+        <div><label for="f">Class</label><select id="f"><option value="all">All classes</option>${classes().map(c => `<option ${c === clsFilter ? "selected" : ""}>${esc(c)}</option>`).join("")}</select></div>
+      </div>
+      ${list.length ? `<div class="row"><button class="btn alt" id="allP">Mark all present</button><button class="btn alt" id="allA">Mark all absent</button></div>
+      <div class="scroll"><table><thead><tr><th>Name</th><th>Roll</th><th>Class</th><th>Status</th></tr></thead><tbody>` +
+        list.map(s => `<tr><td>${esc(s.name)}</td><td>${esc(s.roll)}</td><td>${esc(s.cls)}</td><td><button class="tog ${att[s.id] === "P" ? "p" : "a"}" data-id="${s.id}">${att[s.id] === "P" ? "Present" : "Absent"}</button></td></tr>`).join("") +
+        `</tbody></table></div>
+      <p><b>${p}</b> present, <b>${list.length - p}</b> absent</p>
+      <button class="btn" id="save">Save attendance</button>` : `<p class="empty">Add students first (Students tab).</p>`}`;
+    bindDate();
+    $("f").onchange = e => { clsFilter = e.target.value; attendance(); };
+    if (!list.length) return;
+    document.querySelectorAll(".tog").forEach(b => b.onclick = () => { att[b.dataset.id] = att[b.dataset.id] === "P" ? "A" : "P"; draw(); });
+    $("allP").onclick = () => { list.forEach(s => att[s.id] = "P"); draw(); };
+    $("allA").onclick = () => { list.forEach(s => att[s.id] = "A"); draw(); };
+    $("save").onclick = () => { db.attendance[date] = att; save(); toast("Attendance saved"); };
+  };
+  draw();
+}
+
+/* ============ 7. MEALS ============ */
+function meals() {
+  const m = db.meals[date] || { menu: "", served: "", leftover: "" };
+  $("view").innerHTML = `<h2>Log meals served</h2>
+    <div class="row">${dateField()}</div>
+    <div class="row">
+      <div><label for="menu">Menu</label><input id="menu" value="${esc(m.menu)}" placeholder="Rice, sambar, egg"></div>
+      <div><label for="served">Meals served *</label><input id="served" type="number" min="0" value="${esc(m.served)}"></div>
+      <div><label for="left">Leftover meals</label><input id="left" type="number" min="0" value="${esc(m.leftover)}"></div>
+    </div>
+    <button class="btn" id="save">Save meals</button>`;
+  bindDate();
+  $("save").onclick = () => {
+    const served = parseInt($("served").value, 10);
+    if (isNaN(served) || served < 0) { toast("Enter how many meals were served"); return; }
+    db.meals[date] = { menu: $("menu").value.trim(), served, leftover: parseInt($("left").value, 10) || 0 };
+    save(); toast("Meals saved");
+  };
+}
+
+/* ============ 8. REPORT ============ */
+function report() {
+  const s = summary(date);
+  const att = db.attendance[date] || {};
+  const absentNames = db.students.filter(x => s.hasAtt && att[x.id] !== "P").map(x => esc(x.name) + " (" + esc(x.cls) + ")");
+  $("view").innerHTML = `<h2>Daily report</h2>
+    <div class="row">${dateField()}</div>
+    <div class="grid">
+      <div class="stat"><b>${s.present}</b><span>Present</span></div>
+      <div class="stat"><b>${s.served}</b><span>Meals served</span></div>
+      <div class="stat"><b>${s.leftover}</b><span>Leftover</span></div>
+      <div class="stat"><b>${s.pct}%</b><span>Attendance</span></div>
+    </div>
+    <div class="msg ${s.kind}">${s.kind === "ok" ? "✅" : s.kind === "bad" ? "⚠️" : "ℹ️"} ${s.text}</div>
+    ${s.menu ? `<p>Menu: <b>${esc(s.menu)}</b></p>` : ""}
+    ${absentNames.length ? `<p>Absent: ${absentNames.join(", ")}</p>` : ""}
+    <h2>All records</h2>${historyTable(allDates().map(summary))}
+    <div class="row" style="margin-top:14px"><button class="btn" id="csv">⬇️ Download CSV</button></div>`;
+  bindDate();
+  $("csv").onclick = () => {
+    const rows = [["Date", "Total students", "Present", "Absent", "Attendance %", "Menu", "Meals served", "Leftover", "Status"]]
+      .concat(allDates().map(summary).map(r => [r.d, r.total, r.present, r.absent, r.pct, '"' + r.menu + '"', r.served, r.leftover, r.status]));
+    const blob = new Blob([rows.map(r => r.join(",")).join("\n")], { type: "text/csv" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "meal-report.csv"; a.click();
+  };
+}
+
+/* ============ START ============ */
+drawTabs(); render();
+</script>
+</body>
+</html>
